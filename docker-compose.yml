@@ -96,7 +96,7 @@ services:
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
     volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
+      - postgres-db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
@@ -115,9 +115,9 @@ services:
     ports:
       - "5433:5432"   # Expose to host on port 5433
     volumes:
-      - postgres-data-volume:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
+      test: ["CMD", "pg_isready", "-U", "airbyte"]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -132,37 +132,104 @@ services:
       POSTGRES_USER: airbyte
       POSTGRES_PASSWORD: airbyte
       POSTGRES_DB: airbyte
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airbyte"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
     volumes:
-      - airbyte_db:/var/lib/postgresql/data
+      - airbyte-db:/var/lib/postgresql/data
     networks:
       - data-platform
 
 
   airbyte-server:
-    image: airbyte/server:latest
+    image: airbyte/server:dev-f35f894
     container_name: airbyte-server
     depends_on:
-      - airbyte-db
+      airbyte-db:
+        condition: service_healthy
     environment:
       DATABASE_URL: jdbc:postgresql://airbyte-db:5432/airbyte
       DATABASE_USER: airbyte
       DATABASE_PASSWORD: airbyte
+
       WORKER_ENVIRONMENT: docker
       WORKSPACE_ROOT: /tmp/workspace
+      CONFIG_ROOT: /configs
+      DATA_DOCKER_MOUNT: airbyte_data
+      LOCAL_ROOT: /tmp/airbyte_local
+      TEMPORAL_HOST: airbyte-temporal:7233
     ports:
       - "8001:8001"
+    volumes:
+      - airbyte-data:/tmp/workspace
+    restart: always
     networks:
       - data-platform
 
   airbyte-webapp:
-    image: airbyte/webapp:latest
+    image: airbyte/webapp:1.7.8
     container_name: airbyte-webapp
     depends_on:
       - airbyte-server
     ports:
       - "8000:80"
+    restart: always
     networks:
     - data-platform
+
+  airbyte-worker:
+    image: airbyte/worker:dev-f35f894
+    container_name: airbyte-worker
+    depends_on:
+      - airbyte-server
+    environment:
+      DATABASE_URL: jdbc:postgresql://airbyte-db:5432/airbyte
+      DATABASE_USER: airbyte
+      DATABASE_PASSWORD: airbyte
+
+      WORKER_ENVIRONMENT: docker
+      WORKSPACE_ROOT: /tmp/workspace
+      CONFIG_ROOT: /configs
+      DATA_DOCKER_MOUNT: airbyte_data
+      LOCAL_ROOT: /tmp/airbyte_local
+      TEMPORAL_HOST: airbyte-temporal:7233
+    volumes:
+      - airbyte-data:/tmp/workspace
+    restart: always
+    networks:
+      - data-platform
+  
+  airbyte-temporal:
+    image: airbyte/temporal:1.7.8
+    container_name: airbyte-temporal
+    depends_on:
+      - airbyte-db
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: airbyte
+      POSTGRES_PWD: airbyte
+      POSTGRES_SEEDS: airbyte-db
+    restart: always
+    networks:
+      - data-platform
+  
+  airbyte-cron:
+    image: airbyte/cron:dev-f35f894
+    container_name: airbyte-cron
+    depends_on:
+      - airbyte-server
+    environment:
+      DATABASE_URL: jdbc:postgresql://airbyte-db:5432/airbyte
+      DATABASE_USER: airbyte
+      DATABASE_PASSWORD: airbyte
+      TEMPORAL_HOST: airbyte-temporal:7233
+    restart: always
+    networks:
+      - data-platform
 
   airflow-apiserver:
     <<: *airflow-common
@@ -380,5 +447,7 @@ services:
     networks:
       - data-platform
 volumes:
-  postgres-db-volume:
-  postgres-data-volume:
+  postgres-db:
+  postgres-data:
+  airbyte-db:
+  airbyte-data:
