@@ -57,8 +57,8 @@ ecommerce_dw:
       type: postgres
       host: localhost
       port: 5433
-      user: airbyte
-      password: airbyte
+      user: admin
+      password: admin
       dbname: ecommerce_dw
       schema: public
       threads: 4
